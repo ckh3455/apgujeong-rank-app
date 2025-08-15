@@ -96,37 +96,78 @@ if ENABLE_GSHEETS:
                     ["ts_utc","ts_kst","session_id","event","zone","dong","ho","visitor_id","campaign"],
                     value_input_option="RAW",
                 )
+            # 관리자 모드면 파일명 표시
+            if st.session_state.get("_is_admin"):
+                st.success(f"시트 연결 OK · 파일명: {sh.title}")
             return ws
-        except Exception:
+        except Exception as e:
+            if st.session_state.get("_is_admin"):
+                st.error("❌ 시트 연결 실패(get_gsheet)")
+                st.exception(e)
             return None
 
     def log_event(event, zone=None, dong=None, ho=None):
         ws = get_gsheet()
         if ws is None:
+            if st.session_state.get("_is_admin"):
+                st.warning("ws가 None (연결 실패)")
             return
         now_utc = datetime.now(timezone.utc)
+        row = [
+            now_utc.strftime("%Y-%m-%d %H:%M:%S"),
+            (now_utc + timedelta(hours=9)).strftime("%Y-%m-%d %H:%M:%S"),
+            st.session_state.get("sid",""),
+            event,
+            str(zone) if zone is not None else "",
+            str(dong) if dong is not None else "",
+            str(ho)   if ho   is not None else "",
+            st.session_state.get("visitor_id",""),
+            st.session_state.get("campaign",""),
+        ]
         try:
-            ws.append_row(
-                [
-                    now_utc.strftime("%Y-%m-%d %H:%M:%S"),
-                    (now_utc + timedelta(hours=9)).strftime("%Y-%m-%d %H:%M:%S"),
-                    st.session_state.get("sid",""),
-                    event,
-                    str(zone) if zone is not None else "",
-                    str(dong) if dong is not None else "",
-                    str(ho)   if ho   is not None else "",
-                    st.session_state.get("visitor_id",""),
-                    st.session_state.get("campaign",""),
-                ],
-                value_input_option="RAW",
-            )
-        except Exception:
-            pass
+            ws.append_row(row, value_input_option="RAW")
+            if st.session_state.get("_is_admin"):
+                st.success(f"기록 성공: {event} / {zone}-{dong}-{ho}")
+        except Exception as e:
+            if st.session_state.get("_is_admin"):
+                st.error("❌ 기록 실패(append_row)")
+                st.code(str(row))
+                st.exception(e)
 
 # 앱 첫 진입 로그(세션당 1회)
 if ENABLE_GSHEETS and not st.session_state.get("_logged_open"):
-    log_event("app_open")
+    # 관리자 모드에서도 시도 결과를 보고 싶다면 try/except 해제 가능
+    try:
+        # 첫 진입 시 events 시트가 없으면 여기서 생성됨
+        if "gspread" in globals():
+            log_event("app_open")
+    except Exception:
+        pass
     st.session_state["_logged_open"] = True
+
+# =============== 관리자 진단 패널 (?pin=2580) ===============
+try:
+    qp = st.query_params
+    ADMIN_PIN = st.secrets.get("ADMIN_PIN", "2580")
+    st.session_state["_is_admin"] = (qp.get("pin") == ADMIN_PIN)
+except Exception:
+    st.session_state["_is_admin"] = False
+
+if st.session_state["_is_admin"]:
+    st.markdown("### 🔧 관리자 진단")
+    st.write({
+        "ENABLE_GSHEETS": ENABLE_GSHEETS,
+        "USAGE_SHEET_ID": st.secrets.get("USAGE_SHEET_ID","(없음)"),
+        "서비스계정 이메일": st.secrets.get("gcp_service_account",{}).get("client_email","(없음)"),
+    })
+    if ENABLE_GSHEETS:
+        if st.button("📌 테스트 행 쓰기(관리자)"):
+            try:
+                log_event("admin_test")
+            except Exception as e:
+                st.exception(e)
+    else:
+        st.warning("Secrets 미설정: 구글시트 로깅 비활성화")
 
 # =============== 타이틀/상단 ===============
 st.title("🏢 압구정 구역별 감정가 순위")
@@ -517,7 +558,7 @@ else:
         floors = sorted(set(int(x) for x in g["층"].dropna().tolist()))
         if not floors: continue
         ranges = contiguous_ranges(floors)
-        ranges_str = ", ".join(format_range(s, e) for s, e in ranges)
+        ranges_str = ", ".join(format_range(s, e) for s, e) in ranges
         best_diff = float(g["유사도"].min())
         median_price = float(g["감정가_클린"].median())
         rows.append({
