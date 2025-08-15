@@ -278,34 +278,78 @@ except Exception as e:
     st.error(f"데이터를 불러오지 못했습니다: {e}")
     st.stop()
 
-# =============== ③ 선택 UI ===============
+# =============== ③ 선택 UI (초기 미선택 + 확인 후 진행) ===============
+Z_SENTINEL = "— 구역 선택 —"
+D_SENTINEL = "— 동 선택 —"
+H_SENTINEL = "— 호 선택 —"
+
 zones = sorted(df["구역"].dropna().unique().tolist())
 if not zones:
     st.warning("구역 데이터가 비어 있습니다.")
     st.stop()
 
-if mobile_simple:
-    zone = st.selectbox("구역 선택", zones, index=0)
-    zone_df = df[df["구역"] == zone].copy()
-    dongs = sorted(zone_df["동"].dropna().unique().tolist())
-    dong = st.selectbox("동 선택", dongs, index=0 if dongs else None)
-    dong_df = zone_df[zone_df["동"] == dong].copy()
-    hos = sorted(dong_df["호"].dropna().unique().tolist())
-    ho = st.selectbox("호 선택", hos, index=0 if hos else None)
-else:
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        zone = st.selectbox("구역 선택", zones, index=0)
-    zone_df = df[df["구역"] == zone].copy()
-    with c2:
-        dongs = sorted(zone_df["동"].dropna().unique().tolist())
-        dong = st.selectbox("동 선택", dongs, index=0 if dongs else None)
-    dong_df = zone_df[zone_df["동"] == dong].copy()
-    with c3:
-        hos = sorted(dong_df["호"].dropna().unique().tolist())
-        ho = st.selectbox("호 선택", hos, index=0 if hos else None)
+# 1) 구역
+zone_options = [Z_SENTINEL] + zones
+zone_choice = st.selectbox("구역 선택", zone_options, index=0, key="ui_zone")
 
-sel_df = dong_df[dong_df["호"] == ho].copy()
+# 2) 동 (구역 선택 전엔 비활성)
+if zone_choice != Z_SENTINEL:
+    zone_df_tmp = df[df["구역"] == zone_choice].copy()
+    dongs = sorted(zone_df_tmp["동"].dropna().unique().tolist())
+else:
+    zone_df_tmp = pd.DataFrame()
+    dongs = []
+dong_options = [D_SENTINEL] + dongs
+dong_choice = st.selectbox("동 선택", dong_options, index=0, key="ui_dong",
+                           disabled=(zone_choice == Z_SENTINEL))
+
+# 3) 호 (동 선택 전엔 비활성)
+if dong_choice != D_SENTINEL:
+    dong_df_tmp = zone_df_tmp[zone_df_tmp["동"] == dong_choice].copy()
+    hos = sorted(dong_df_tmp["호"].dropna().unique().tolist())
+else:
+    dong_df_tmp = pd.DataFrame()
+    hos = []
+ho_options = [H_SENTINEL] + hos
+ho_choice = st.selectbox("호 선택", ho_options, index=0, key="ui_ho",
+                         disabled=(dong_choice == D_SENTINEL))
+
+# 4) 확인 버튼 (세 값이 모두 유효해야 활성화)
+valid_pick = (zone_choice != Z_SENTINEL) and (dong_choice != D_SENTINEL) and (ho_choice != H_SENTINEL)
+confirm_col, reset_col = st.columns([1,1])
+with confirm_col:
+    if st.button("✅ 확인 (조회/기록)", disabled=not valid_pick, use_container_width=True):
+        st.session_state["confirmed"] = True
+        st.session_state["sel_zone"] = zone_choice
+        st.session_state["sel_dong"] = dong_choice
+        st.session_state["sel_ho"]   = ho_choice
+        # 선택 즉시 로그 기록
+        if ENABLE_GSHEETS:
+            try:
+                log_event("select", zone=zone_choice, dong=dong_choice, ho=ho_choice)
+            except Exception:
+                pass
+        st.rerun()
+
+with reset_col:
+    if st.session_state.get("confirmed"):
+        if st.button("↩ 다시 선택", use_container_width=True):
+            for k in ["confirmed","sel_zone","sel_dong","sel_ho"]:
+                st.session_state.pop(k, None)
+            st.rerun()
+
+# 5) 확인 전에는 아래 섹션 렌더링 중단
+if not st.session_state.get("confirmed"):
+    st.stop()
+
+# 6) 이후 계산에 쓸 확정 값 셋업
+zone = st.session_state["sel_zone"]
+dong = st.session_state["sel_dong"]
+ho   = st.session_state["sel_ho"]
+
+zone_df = df[df["구역"] == zone].copy()
+dong_df = zone_df[zone_df["동"] == dong].copy()
+sel_df  = dong_df[dong_df["호"] == ho].copy()
 if sel_df.empty:
     st.warning("선택한 동/호 데이터가 없습니다.")
     st.stop()
@@ -502,14 +546,3 @@ else:
             file_name=f"압구정_유사금액_범위_TOP10_{zone}_{dong}_{ho}.csv",
             mime="text/csv"
         )
-
-# =============== ⑨ 조회/기록 버튼 (클릭 시 선택 기록) ===============
-st.divider()
-colA, colB = st.columns([1,3])
-with colA:
-    if st.button("🔎 조회 / 기록", use_container_width=True):
-        if ENABLE_GSHEETS:
-            log_event("select", zone=zone, dong=dong, ho=ho)
-        st.toast("기록 완료!", icon="✅")
-with colB:
-    st.caption("버튼을 누르면 현재 선택(구역·동·호)이 로그 시트에 기록됩니다.")
