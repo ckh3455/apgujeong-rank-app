@@ -558,7 +558,7 @@ else:
         floors = sorted(set(int(x) for x in g["층"].dropna().tolist()))
         if not floors: continue
         ranges = contiguous_ranges(floors)
-        ranges_str = ", ".join(format_range(s, e) for s, e in ranges
+        ranges_str = ", ".join(format_range(s, e) for s, e in ranges)
         best_diff = float(g["유사도"].min())
         median_price = float(g["감정가_클린"].median())
         rows.append({
@@ -587,4 +587,5 @@ else:
             file_name=f"압구정_유사금액_범위_TOP10_{zone}_{dong}_{ho}.csv",
             mime="text/csv"
         )
+
 
