@@ -1,6 +1,8 @@
+streamlit-js-eval==0.1.7
 streamlit>=1.36
 pandas
 numpy
 openpyxl
 gspread>=6.0.0
 google-auth>=2.0.0
+
