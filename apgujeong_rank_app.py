@@ -8,7 +8,33 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+# === imports (파일 상단) ===
 import streamlit as st
+from datetime import datetime, timezone, timedelta
+
+try:
+    from zoneinfo import ZoneInfo  # Py3.9+
+except Exception:
+    ZoneInfo = None
+
+
+# === 로컬시간 헬퍼 (LOG_TZ 기본 Asia/Seoul) ===
+def now_local():
+    """로그용 로컬 시간. secrets의 LOG_TZ를 우선 사용(기본 'Asia/Seoul')."""
+    tz_name = st.secrets.get("LOG_TZ", "Asia/Seoul")
+
+    # zoneinfo가 있으면 우선 사용
+    if ZoneInfo is not None:
+        try:
+            return datetime.now(ZoneInfo(tz_name))
+        except Exception:
+            pass
+
+    # Fallback: KST 전용(또는 UTC)
+    if tz_name == "Asia/Seoul":
+        return datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(hours=9)
+    return datetime.utcnow().replace(tzinfo=timezone.utc)
+
 
 # ===== 페이지 설정 =====
 st.set_page_config(
@@ -556,4 +582,5 @@ if go:
         st.success("조회/기록되었습니다.")
     else:
         st.warning(f"로그 기록 생략: {msg}")
+
 
