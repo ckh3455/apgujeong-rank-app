@@ -4,9 +4,10 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import re, uuid
+import re
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
+from streamlit.components.v1 import html as st_html  # ✅ 홍보문구 확실히 보이도록
 
 # ===== 페이지 세팅 =====
 st.set_page_config(
@@ -25,10 +26,10 @@ APP_DESCRIPTION = (
     "**동별(또는 동·평형별) 연속 층 범위**로 간소화하여 표시합니다."
 )
 
-DISPLAY_PRICE_LABEL = "환산감정가(억)"   # 보여줄 환산가 라벨
-PUBLIC_PRICE_LABEL  = "25년 공시가(억)"   # 25년 공시가 라벨
-ROUND_DECIMALS      = 6                  # 동점 판정 소수 라운딩
-ADJUST_DIVISOR      = 0.69               # 환산감정가 = 공시가 ÷ 0.69 (요청 반영)
+DISPLAY_PRICE_LABEL = "환산감정가(억)"     # 보여줄 환산가 라벨
+PUBLIC_PRICE_LABEL  = "25년 공시가(억)"     # 25년 공시가 라벨
+ROUND_DECIMALS      = 6                    # 동점 판정 소수 라운딩
+ADJUST_DIVISOR      = 0.69                 # 환산감정가 = 공시가 ÷ 0.69
 
 # 기본 구글시트 데이터 소스(외부 공개: 링크 있는 모든 사용자 보기)
 DEFAULT_SHEET_URL = (
@@ -37,18 +38,20 @@ DEFAULT_SHEET_URL = (
     "export?format=xlsx&gid=1484463303"
 )
 
-# 프로모(업소 홍보) 카드
+# ✅ 프로모(업소 홍보) 카드
 PROMO_HTML = """
-<div class="promo-box">
-  <div class="promo-title">📞 압구정 원 부동산</div>
-  <div class="promo-line">압구정 재건축 전문 컨설팅 · 순위를 알고 사야하는 압구정</div>
-  <div class="promo-line"><strong>문의</strong></div>
-  <div class="promo-line">02-540-3334 / 최이사 Mobile 010-3065-1780</div>
-  <div class="promo-small">압구정 미래가치 예측.</div>
+<div style="padding:12px 14px;border:1px solid #eee;border-radius:12px;background:#fafafa;">
+  <div style="font-size:1.25rem;font-weight:800;margin-bottom:6px">📞 압구정 원 부동산</div>
+  <div style="font-size:1.05rem;font-weight:600;line-height:1.5">
+    압구정 재건축 전문 컨설팅 · 순위를 알고 사야하는 압구정
+  </div>
+  <div style="font-size:1.05rem;font-weight:600;margin-top:6px"><strong>문의</strong></div>
+  <div style="font-size:1.05rem;font-weight:600">02-540-3334 / 최이사 Mobile 010-3065-1780</div>
+  <div style="font-size:1.0rem;font-weight:700;font-style:italic;margin-top:6px">압구정 미래가치 예측.</div>
 </div>
 """
 
-# ====== 스타일: 모바일/데스크탑 모두 표 가독성 개선 ======
+# ====== 스타일: 모바일/데스크탑 모두 표 가독성 개선 + 동/평형 폭 축소 ======
 st.markdown("""
 <style>
 @media (max-width: 640px) {
@@ -58,19 +61,7 @@ st.markdown("""
   label, .stSelectbox label { font-size: 0.95rem !important; }
 }
 
-/* 프로모 박스 */
-.promo-box { 
-  padding: 12px 14px; 
-  border-radius: 12px; 
-  background: #fafafa; 
-  border: 1px solid #eee; 
-  margin: 12px 0 10px 0;
-}
-.promo-title { font-size: 1.25rem; font-weight: 800; margin-bottom: 6px; }
-.promo-line  { font-size: 1.05rem; font-weight: 600; line-height: 1.5; }
-.promo-small { font-size: 1.0rem; font-weight: 700; font-style: italic; margin-top: 6px; }
-
-/* 데이터프레임 헤더/셀 모바일 크기 */
+/* 선택세대 상세 표: 제목/셀 폰트 축소 */
 #sel-detail-table div[data-testid="stDataFrame"] th {
   font-size: .80rem !important;
   white-space: normal !important;
@@ -82,6 +73,18 @@ st.markdown("""
 @media (max-width:640px){
   #sel-detail-table div[data-testid="stDataFrame"] th { font-size: .72rem !important; }
   #sel-detail-table div[data-testid="stDataFrame"] td { font-size: .90rem !important; }
+}
+
+/* ✅ 선택세대 상세에서 2열(동), 4열(평형) 폭 더 좁게 강제 */
+#sel-detail-table thead tr th:nth-child(2),
+#sel-detail-table tbody tr td:nth-child(2){
+  width: 60px !important; min-width: 52px !important; max-width: 70px !important;
+  text-align: center !important;
+}
+#sel-detail-table thead tr th:nth-child(4),
+#sel-detail-table tbody tr td:nth-child(4){
+  width: 70px !important; min-width: 56px !important; max-width: 80px !important;
+  text-align: center !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -106,13 +109,13 @@ def clean_price(series: pd.Series) -> pd.Series:
     if series is None:
         return pd.Series(dtype=float)
     s = series.astype(str)
-    s = (s.str.replace('\u00A0','', regex=False)  # NBSP
+    s = (s.str.replace('\u00A0','', regex=False)
            .str.replace(',', '', regex=False)
            .str.replace('`', '', regex=False)
            .str.replace("'", '', regex=False)
            .str.replace('억', '', regex=False)
            .str.strip())
-    s = s.str.replace(r'[^0-9.\-]', '', regex=True)  # 숫자/소수점/음수만
+    s = s.str.replace(r'[^0-9.\-]', '', regex=True)
     return pd.to_numeric(s, errors='coerce')
 
 # ====== 데이터 로딩 (버튼으로 갱신) ======
@@ -139,7 +142,7 @@ def load_data(source, _nonce:int):
             raise FileNotFoundError(f"경로가 존재하지 않습니다: {p}")
         df = pd.read_excel(p, sheet_name=0)
 
-    # 열 이름 표준화(존재하는 것만)
+    # 열 이름 표준화
     rename_map = {
         "구역":"구역", "동":"동", "호":"호",
         "공시가(억)":"공시가(억)", "감정가(억)":"감정가(억)",
@@ -152,13 +155,13 @@ def load_data(source, _nonce:int):
         if c in df.columns:
             df[c] = df[c].astype(str).str.strip()
 
-    # 25년 공시가 컬럼 만들기(있으면 숫자화)
+    # 25년 공시가 숫자 컬럼 생성
     if "공시가(억)" in df.columns:
         df[PUBLIC_PRICE_LABEL] = pd.to_numeric(df["공시가(억)"], errors="coerce")
     elif PUBLIC_PRICE_LABEL in df.columns:
         df[PUBLIC_PRICE_LABEL] = pd.to_numeric(df[PUBLIC_PRICE_LABEL], errors="coerce")
 
-    # 환산감정가 = 공시가 ÷ 0.69, 공시가 없으면 감정가(억) 클린 사용
+    # 환산감정가 = 공시가 ÷ 0.69, 없으면 감정가(억) 클린
     public = df.get(PUBLIC_PRICE_LABEL, pd.Series(dtype=float))
     public = pd.to_numeric(public, errors="coerce")
     derived = public / ADJUST_DIVISOR
@@ -188,19 +191,15 @@ with right:
 with st.expander("① 데이터 파일/URL 선택 — 필요한 열: ['구역','동','호','공시가(억)'/ '25년 공시가(억)','감정가(억)','평형']", expanded=False):
     uploaded = st.file_uploader("엑셀 파일 업로드 (.xlsx)", type=["xlsx"])
     manual_source = st.text_input("로컬 파일 경로 또는 Google Sheets/CSV URL (선택)", value="")
-    same_folder_default = Path.cwd() / "압구정 공시가.xlsx"
-
     if uploaded is not None:
         resolved_source = uploaded
         source_desc = "업로드된 파일 사용"
     elif manual_source.strip():
-        ms = normalize_gsheet_url(manual_source.strip())
-        resolved_source = ms
+        resolved_source = normalize_gsheet_url(manual_source.strip())
         source_desc = "직접 입력 소스 사용"
     else:
         resolved_source = DEFAULT_SHEET_URL
         source_desc = "기본 Google Sheets 사용"
-
     st.success(f"데이터 소스: {source_desc}")
     st.caption(f"현재 소스: {resolved_source if isinstance(resolved_source, str) else '업로드된 파일'}")
 
@@ -257,7 +256,7 @@ bad_rows = zone_df[bad_mask].copy()
 # 동점 키
 work["가격키"] = work["감정가_클린"].round(ROUND_DECIMALS) if ROUND_DECIMALS is not None else work["감정가_클린"]
 
-# 경쟁 순위(내림차순 큰 값이 1위)
+# 경쟁 순위
 work["순위"] = work["가격키"].rank(method="min", ascending=False).astype(int)
 work["공동세대수"] = work.groupby("가격키")["가격키"].transform("size")
 
@@ -313,9 +312,9 @@ if not sel_df.empty:
     )
     col_conf = {
         "구역": st.column_config.TextColumn("구역", width="small"),
-        "동": st.column_config.TextColumn("동", width="small"),
+        "동": st.column_config.TextColumn("동", width="small"),       # ✅ 더 좁게
         "호": st.column_config.TextColumn("호", width="small"),
-        "평형": st.column_config.NumberColumn("평형", width="small"),
+        "평형": st.column_config.NumberColumn("평형", width="small"), # ✅ 더 좁게
         PUBLIC_PRICE_LABEL: st.column_config.NumberColumn("공시가", format="%.2f", width="small"),
         DISPLAY_PRICE_LABEL: st.column_config.NumberColumn("환산가", format="%.2f", width="small"),
     }
@@ -325,8 +324,8 @@ if not sel_df.empty:
 else:
     st.info("선택 세대는 유효 순위 계산 집합에 없습니다.")
 
-# === 프로모 텍스트(선택 세대 상세 아래, 모바일에서도 노출) ===
-st.markdown(PROMO_HTML, unsafe_allow_html=True)
+# ✅ 홍보문구: components.html 로 확실히 표시 (모바일에서도 사라지지 않음)
+st_html(PROMO_HTML, height=180, scrolling=False)
 
 st.divider()
 
@@ -364,14 +363,12 @@ def contiguous_ranges(sorted_ints):
 def format_range(s, e):
     return f"{s}층" if s == e else f"{s}층에서 {e}층까지"
 
-if sel_rank is None or pd.isna(sel_key):
+if pd.isna(sel_key):
     st.info("선택 세대의 환산감정가가 유효하지 않아 공동순위를 계산할 수 없습니다.")
 else:
     tmp = work.copy()
     tmp["층"] = tmp["호"].apply(extract_floor)
-
     grp = tmp[tmp["가격키"] == sel_key].copy()
-
     st.markdown(f"**공동 {sel_rank}위 ({sel_tied}세대)** · {DISPLAY_PRICE_LABEL}: **{sel_key:,.2f}**")
 
     no_floor = grp["층"].isna().sum()
@@ -380,7 +377,6 @@ else:
 
     rows = []
     if "평형" in grp.columns and grp["평형"].notna().any():
-        # 동·평형 별로 나눠 연속 층 범위
         for (dong_name, pyeong), g in grp.dropna(subset=["층"]).groupby(["동","평형"], dropna=True):
             floors = sorted(set(int(x) for x in g["층"].dropna().tolist()))
             if not floors:
@@ -400,7 +396,6 @@ else:
     if rows:
         out = pd.DataFrame(rows)
         st.dataframe(out, use_container_width=True, hide_index=True)
-        # CSV 다운로드
         csv_agg = out.to_csv(index=False).encode("utf-8-sig")
         st.download_button("현재 공동순위 요약 CSV 다운로드", csv_agg,
                            file_name=f"{zone}_공동{sel_rank}위_동별층요약.csv", mime="text/csv")
@@ -439,7 +434,6 @@ else:
         (np.isclose(pool["감정가_클린"], sel_price, rtol=0, atol=1e-6))
     )].copy()
 
-    # 유사도(절대차) 계산 -> 후보 정렬
     pool["유사도"] = (pool["감정가_클린"] - sel_price).abs()
     cand = pool.sort_values(["유사도", "감정가_클린"], ascending=[True, False]).head(1000).copy()
 
@@ -461,13 +455,12 @@ else:
             s += f" ({ip}평)"
         return s
 
-    # (구역, 동[, 평형]) 별 연속 층 범위 요약
-    rows = []
     if "평형" in cand.columns and cand["평형"].notna().any():
         gb_keys = ["구역", "동", "평형"]
     else:
         gb_keys = ["구역", "동"]
 
+    rows = []
     for keys, g in cand.dropna(subset=["층"]).groupby(gb_keys):
         k = list(keys)
         zone_name = k[0]
