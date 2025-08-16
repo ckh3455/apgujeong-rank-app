@@ -305,9 +305,7 @@ else:
 
 # ★ 홍보박스: 이 위치(선택 세대 상세 바로 아래)에 강제 표시
 render_promo(key_suffix="below-detail")
-# 모바일은 특정 레이아웃에서 가려질 수 있어 한 번 더 시도 (중복 방지를 위해 key_suffix 다르게)
-if mobile_simple:
-    render_promo(key_suffix="below-detail-mobile")
+
 
 st.divider()
 
@@ -489,4 +487,5 @@ else:
             file_name=f"압구정_유사금액_범위_TOP10_{zone}_{dong}_{ho}.csv",
             mime="text/csv"
         )
+
 
