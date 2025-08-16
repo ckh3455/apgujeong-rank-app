@@ -262,10 +262,6 @@ with st.expander("① 데이터 파일/URL 선택 — 필요한 열: ['구역','
     else:
         resolved_source = DEFAULT_SHEET_URL
         source_desc = "기본 Google Sheets 사용"
-        # 같은 폴더 우선 사용하려면 주석 해제
-        # if same_folder_default.exists():
-        #     resolved_source = str(same_folder_default)
-        #     source_desc = f"같은 폴더 엑셀 사용: {same_folder_default}"
 
     st.success(f"데이터 소스: {source_desc}")
     st.caption(f"현재 소스: {resolved_source if isinstance(resolved_source, str) else '업로드된 파일 객체'}")
@@ -330,7 +326,7 @@ if "app_open_logged" not in st.session_state:
     log_event("app_open")
     st.session_state["app_open_logged"] = True
 
-# 사용자가 선택 변경 시 로깅
+# 선택 변경 로깅
 if st.session_state.get("last_choice") != (zone, dong, ho):
     log_event("select", zone, dong, ho)
     st.session_state["last_choice"] = (zone, dong, ho)
@@ -340,7 +336,7 @@ if sel_df.empty:
     st.warning("선택한 동/호 데이터가 없습니다.")
     st.stop()
 
-# ===== 유효성/순위 계산(경쟁 순위, 높은 금액 우선) =====
+# ===== 유효성/순위 계산 =====
 total_units_all = len(zone_df)
 
 work = zone_df.dropna(subset=["감정가_클린"]).copy()
@@ -350,17 +346,11 @@ work["감정가_클린"] = work["감정가_클린"].astype(float)
 bad_mask = pd.to_numeric(zone_df["감정가_클린"], errors="coerce").isna()
 bad_rows = zone_df[bad_mask].copy()
 
-# 동점 키(라운딩 or 원값)
 work["가격키"] = work["감정가_클린"].round(ROUND_DECIMALS) if ROUND_DECIMALS is not None else work["감정가_클린"]
-
-# 경쟁 순위(높을수록 상위)
 work["순위"] = work["가격키"].rank(method="min", ascending=False).astype(int)
 work["공동세대수"] = work.groupby("가격키")["가격키"].transform("size")
-
-# 높은 금액 우선 정렬(+동/호 보조)
 work = work.sort_values(["가격키", "동", "호"], ascending=[False, True, True]).reset_index(drop=True)
 
-# 선택 세대 정보
 sel_row = work[(work["동"] == dong) & (work["호"] == ho)]
 sel_price  = float(sel_row.iloc[0]["감정가_클린"]) if not sel_row.empty else np.nan
 sel_key    = round(sel_price, ROUND_DECIMALS) if (pd.notna(sel_price) and ROUND_DECIMALS is not None) else sel_price
@@ -368,7 +358,7 @@ sel_rank   = int(sel_row.iloc[0]["순위"]) if not sel_row.empty else None
 sel_tied   = int(sel_row.iloc[0]["공동세대수"]) if not sel_row.empty else 0
 sel_py     = sel_row.iloc[0]["평형"] if "평형" in sel_row.columns and not sel_row.empty else np.nan
 
-# ✅ 선택 세대 공시가(억) 추출
+# 선택 세대 공시가(억)
 sel_public = np.nan
 if not sel_df.empty and "공시가(억)" in sel_df.columns:
     _tmp = clean_price(pd.Series([sel_df.iloc[0]["공시가(억)"]]))
@@ -405,23 +395,41 @@ else:
 st.caption(DISPLAY_PRICE_NOTE)
 st.divider()
 
-# ===== 선택 세대 상세 =====
-basic_cols = ["동", "호", "평형", "공시가(억)", "감정가_클린", "순위", "공동세대수"]  # 공시가 포함
-full_cols  = ["구역", "동", "호", "평형", "공시가(억)", "감정가(억)", "감정가_클린", "순위", "공동세대수"]
-show_cols  = basic_cols if mobile_simple else full_cols
-
+# ===== 선택 세대 상세 (모바일 최적화 + 프로모 노출 고정) =====
+# 모바일에선 st.table + 짧은 라벨로 한 화면에 맞춤, 프로모는 제목 바로 아래 먼저 표시
 st.subheader("선택 세대 상세")
-if not sel_row.empty:
-    sel_view = sel_row[show_cols].rename(columns={
-        "감정가_클린": DISPLAY_PRICE_LABEL,
-        "공시가(억)": "25년 공시가(억)"  # 보기 라벨
-    })
-    st.dataframe(sel_view.reset_index(drop=True), use_container_width=True, height=200 if mobile_simple else None)
-else:
-    st.info("선택 세대는 유효 순위 계산 집합에 없습니다.")
 
-# ✅ 프로모 텍스트(선택 세대 상세 섹션 내부)
-st.markdown(PROMO_TEXT_HTML, unsafe_allow_html=True)
+if mobile_simple:
+    # 먼저 프로모 고정 노출 (모바일에서 위로 끌어올림)
+    st.markdown(PROMO_TEXT_HTML, unsafe_allow_html=True)
+
+    if not sel_row.empty:
+        # 모바일용 짧은 라벨 & 테이블 출력(줄바꿈 가능)
+        mobile_cols = ["동", "호", "평형", "공시가(억)", "감정가_클린", "순위", "공동세대수"]
+        sel_m = sel_row[mobile_cols].rename(columns={
+            "공시가(억)": "공시가",
+            "감정가_클린": "환산가",
+            "공동세대수": "공동"
+        })
+        st.table(sel_m.reset_index(drop=True))  # 가로 스크롤 대신 줄바꿈
+    else:
+        st.info("선택 세대는 유효 순위 계산 집합에 없습니다.")
+else:
+    # 데스크톱은 기존 dataframe 유지 + 프로모는 표 아래 노출
+    basic_cols = ["동", "호", "평형", "공시가(억)", "감정가_클린", "순위", "공동세대수"]
+    full_cols  = ["구역", "동", "호", "평형", "공시가(억)", "감정가(억)", "감정가_클린", "순위", "공동세대수"]
+    show_cols  = full_cols
+    if not sel_row.empty:
+        sel_view = sel_row[show_cols].rename(columns={
+            "감정가_클린": DISPLAY_PRICE_LABEL,
+            "공시가(억)": "25년 공시가(억)"
+        })
+        st.dataframe(sel_view.reset_index(drop=True), use_container_width=True)
+    else:
+        st.info("선택 세대는 유효 순위 계산 집합에 없습니다.")
+
+    # 데스크톱: 프로모 박스 표 아래
+    st.markdown(PROMO_TEXT_HTML, unsafe_allow_html=True)
 
 st.divider()
 
@@ -452,7 +460,11 @@ else:
     rows = sorted(rows, key=lambda r: _num_from_text(r["동"]))
     if rows:
         out = pd.DataFrame(rows)
-        st.dataframe(out, use_container_width=True)
+        if mobile_simple:
+            # 모바일: 폭 줄이기 위해 테이블 사용
+            st.table(out)
+        else:
+            st.dataframe(out, use_container_width=True)
         csv_agg = out.to_csv(index=False).encode("utf-8-sig")
         st.download_button("현재 공동순위 요약 CSV 다운로드", csv_agg,
                            file_name=f"{zone}_공동{sel_rank}위_동별층요약.csv", mime="text/csv")
@@ -465,7 +477,10 @@ if not bad_rows.empty:
     with st.expander("비정상 환산감정가 행 보기 / 다운로드", expanded=False):
         cols_exist = [c for c in ["구역","동","호","공시가(억)","감정가(억)","평형"] if c in bad_rows.columns]
         bad_show = bad_rows[["구역","동","호"] + cols_exist].copy().drop_duplicates()
-        st.dataframe(bad_show.reset_index(drop=True), use_container_width=True)
+        if mobile_simple:
+            st.table(bad_show.reset_index(drop=True))
+        else:
+            st.dataframe(bad_show.reset_index(drop=True), use_container_width=True)
         bad_csv = bad_show.to_csv(index=False).encode("utf-8-sig")
         st.download_button("비정상 환산감정가 목록 CSV 다운로드", bad_csv,
                            file_name=f"{zone}_비정상_환산감정가_목록.csv", mime="text/csv")
@@ -527,7 +542,13 @@ else:
             ascending=[True, False, True, True]
         ).head(10).drop(columns=["_sort_zone", "_sort_dong"])
 
-        st.dataframe(out.reset_index(drop=True), use_container_width=True)
+        if mobile_simple:
+            # 모바일: 화면 폭 맞추기 위해 핵심 열만 노출
+            keep = ["구역", "동(평형)", "층 범위", "최소차(억)"]
+            st.table(out[keep].reset_index(drop=True))
+        else:
+            st.dataframe(out.reset_index(drop=True), use_container_width=True)
+
         csv_sim = out.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
             "유사금액 범위 TOP10 CSV 다운로드",
