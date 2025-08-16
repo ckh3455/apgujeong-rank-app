@@ -41,17 +41,23 @@ st.markdown("""
   label, .stSelectbox label { font-size: 0.95rem !important; }
 }
 
-/* 홍보 박스: 어떤 레이아웃에서도 강제 노출 */
+/* 홍보 박스: 어떤 레이아웃/테마에서도 반드시 보이도록 */
 .promo-wrapper { display:block !important; visibility:visible !important; width:100% !important; }
 .promo-box { 
-  padding: 12px 14px; border-radius: 12px; background:#fafafa; 
+  padding: 12px 14px; border-radius: 12px; background:#ffffff; 
   border:1px solid #eee; margin: 12px 0; width:100%;
   display:block !important; visibility:visible !important; 
   position:relative; z-index: 5;
+
+  /* 💡핵심: 글자색을 다크/라이트 상관없이 검정으로 고정 */
+  color:#111 !important;
 }
+.promo-box * { color:#111 !important; }   /* 내부 모든 텍스트도 검정 고정 */
+
 .promo-title { font-size: 1.25rem; font-weight:800; margin-bottom: 6px; }
 .promo-line  { font-size: 1.1rem;  font-weight:600; line-height:1.5; }
 .promo-small { font-size: 1.0rem;  font-weight:700; font-style: italic; margin-top:6px; }
+
 @media (max-width: 640px) {
   .promo-title { font-size: 1.15rem; }
   .promo-line  { font-size: 1.05rem; }
@@ -59,6 +65,7 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+
 
 # ====== 도우미 ======
 def normalize_gsheet_url(url: str) -> str:
@@ -482,3 +489,4 @@ else:
             file_name=f"압구정_유사금액_범위_TOP10_{zone}_{dong}_{ho}.csv",
             mime="text/csv"
         )
+
