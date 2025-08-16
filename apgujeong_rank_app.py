@@ -5,6 +5,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import re, json, uuid
+import time
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime, timezone, timedelta
@@ -588,3 +589,4 @@ else:
 if st.button("확인", type="primary"):
     log_selection_if_ready()
     st.success("선택이 기록되었습니다. (시트 반영까지 약간의 지연이 있을 수 있습니다)")
+
