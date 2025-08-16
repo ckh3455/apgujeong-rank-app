@@ -98,12 +98,13 @@ def load_data(source):
     is_url = isinstance(source, str) and source.startswith(("http://","https://"))
     with st.spinner("데이터 불러오는 중…"):
         if is_url:
-            parsed = urlparse(source)
+            src = add_cache_bust(source)  # ✅ 캐시 무시 파라미터 추가
+            parsed = urlparse(src)
             fmt = (parse_qs(parsed.query).get("format", [None])[0] or "").lower()
             if fmt == "csv":
-                df = pd.read_csv(source)
+                df = pd.read_csv(src)
             else:
-                df = pd.read_excel(source, sheet_name=0)
+                df = pd.read_excel(src, sheet_name=0)
         else:
             p = Path(source)
             if not p.exists():
@@ -589,4 +590,5 @@ else:
 if st.button("확인", type="primary"):
     log_selection_if_ready()
     st.success("선택이 기록되었습니다. (시트 반영까지 약간의 지연이 있을 수 있습니다)")
+
 
