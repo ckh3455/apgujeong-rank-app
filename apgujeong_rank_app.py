@@ -117,6 +117,10 @@ def load_data(source):
         if c in df.columns:
             df[c] = df[c].astype(str).str.strip()
 
+    # ✅ 평형이 있으면 문자열 정리
+    if "평형" in df.columns:
+        df["평형"] = df["평형"].astype(str).str.strip()
+
     # 환산감정가 = 공시가/0.7, 없으면 감정가(억)로 대체
     public = pd.to_numeric(df.get("공시가(억)"), errors="coerce")
     derived = public / 0.7
@@ -155,14 +159,16 @@ def contiguous_ranges(sorted_ints):
 def format_range(s, e):
     return f"{s}층" if s == e else f"{s}층에서 {e}층까지"
 
+def _fmt_pyeong(x):
+    if x is None or (isinstance(x, float) and np.isnan(x)):
+        return ""
+    s = str(x).strip()
+    if not s:
+        return ""
+    return s if "평" in s else f"{s}평형"
+
 # ====== Google Sheets 로깅 ======
 def _load_service_account_from_secrets():
-    """
-    secrets에 저장된 서비스 계정 JSON을 다양한 형태로 지원:
-    - st.secrets["gcp_service_account"] (dict)
-    - st.secrets["gcp_service_account_json"] (string json)
-    - st.secrets["google_service_account"] (dict)
-    """
     try:
         if "gcp_service_account" in st.secrets:
             return dict(st.secrets["gcp_service_account"])
@@ -205,7 +211,7 @@ def _get_sheet():
         return None, err
     try:
         sh = client.open_by_key(sheet_id)
-        ws = sh.sheet1  # 첫 시트 사용
+        ws = sh.sheet1
         return ws, None
     except Exception as e:
         return None, f"open_sheet_error: {e}"
@@ -215,39 +221,29 @@ def _kst_now_str():
     return datetime.now(tz=kst).strftime("%Y-%m-%d %H:%M:%S")
 
 def log_event(event, extra=None):
-    """
-    행 포맷 (예):
-    [now, now, session_id, event, zone, dong, ho, request_id]
-    """
     ws, err = _get_sheet()
     if err or ws is None:
         return False, err
 
-    session_id = st.session_state.get("session_id")
-    if not session_id:
-        session_id = str(uuid.uuid4())
-        st.session_state["session_id"] = session_id
+    session_id = st.session_state.get("session_id") or str(uuid.uuid4())
+    st.session_state["session_id"] = session_id
 
     now = _kst_now_str()
-    req_id = st.session_state.get("request_id")
-    if not req_id:
-        req_id = str(uuid.uuid4())
-        st.session_state["request_id"] = req_id
+    req_id = st.session_state.get("request_id") or str(uuid.uuid4())
+    st.session_state["request_id"] = req_id
 
-    zone = extra.get("zone") if extra else ""
-    dong = extra.get("dong") if extra else ""
-    ho   = extra.get("ho") if extra else ""
+    zone = (extra or {}).get("zone", "")
+    dong = (extra or {}).get("dong", "")
+    ho   = (extra or {}).get("ho", "")
 
     row = [now, now, session_id, event, zone, dong, ho, req_id]
     try:
-        # value_input_option="RAW" 로 깔끔히
         ws.append_row(row, value_input_option="RAW")
         return True, None
     except Exception as e:
         return False, str(e)
 
 def log_selection_if_ready():
-    """구역/동/호가 모두 선택됐으면 select 이벤트 기록(조용히)."""
     z = st.session_state.get("zone")
     d = st.session_state.get("dong")
     h = st.session_state.get("ho")
@@ -299,6 +295,8 @@ try:
         df = df.rename(columns={"구역":"구역","동":"동","호":"호","공시가(억)":"공시가(억)","감정가(억)":"감정가(억)"})
         for c in ["구역","동","호"]:
             df[c] = df[c].astype(str).str.strip()
+        if "평형" in df.columns:
+            df["평형"] = df["평형"].astype(str).str.strip()
         public = pd.to_numeric(df.get("공시가(억)"), errors="coerce")
         derived = public / 0.7
         fallback = clean_price(df.get("감정가(억)", pd.Series(dtype=object)))
@@ -389,7 +387,7 @@ if mobile_simple:
     st.metric("구역 전체 세대수", f"{total_units_all:,} 세대")
     st.metric("유효 세대수(환산감정가 있음)", f"{total_units_valid:,} 세대")
     st.metric(f"선택 세대 {DISPLAY_PRICE_LABEL}", f"{sel_price:,.2f}" if pd.notna(sel_price) else "-")
-    # ✅ 모바일: 상단에 프로모션 즉시 노출
+    # 모바일: 상단에 프로모션 즉시 노출
     st.markdown(PROMO_TEXT_HTML, unsafe_allow_html=True)
     st.divider()
 else:
@@ -413,9 +411,27 @@ st.divider()
 # ===== 선택 세대 상세 =====
 basic_cols = ["동", "호", "감정가_클린", "순위", "공동세대수"]
 full_cols  = ["구역", "동", "호", "공시가(억)", "감정가(억)", "감정가_클린", "순위", "공동세대수"]
-show_cols  = basic_cols if mobile_simple else full_cols
+
+# 평형 컬럼이 있으면 '호' 다음에 끼워 넣기
+def _inject_pyeong(cols):
+    cols = cols.copy()
+    if "평형" in df.columns and "평형" not in cols:
+        try:
+            i = cols.index("호") + 1
+        except ValueError:
+            i = len(cols)
+        cols = cols[:i] + ["평형"] + cols[i:]
+    return cols
+
+show_cols = _inject_pyeong(basic_cols if mobile_simple else full_cols)
 
 st.subheader("선택 세대 상세")
+
+# 선택한 동·호 옆에 평형 캡션
+sel_pyeong = sel_row["평형"].iloc[0] if ("평형" in sel_row.columns and not sel_row.empty) else None
+if sel_pyeong:
+    st.caption(f"선택: **{st.session_state['dong']}동 {st.session_state['ho']}호** ({_fmt_pyeong(sel_pyeong)})")
+
 if not sel_row.empty:
     sel_view = sel_row[show_cols].rename(columns={"감정가_클린": DISPLAY_PRICE_LABEL})
     st.dataframe(sel_view.reset_index(drop=True),
@@ -423,13 +439,13 @@ if not sel_row.empty:
 else:
     st.info("선택 세대는 유효 순위 계산 집합에 없습니다.")
 
-# ✅ 데스크톱에서는 기존 위치에 프로모션 노출
+# 데스크톱에서는 기존 위치에 프로모션 노출
 if not mobile_simple:
     st.markdown("---")
     st.markdown(PROMO_TEXT_HTML, unsafe_allow_html=True)
     st.markdown("---")
 
-# ===== 공동순위 요약 (동별 연속 층 범위) =====
+# ===== 공동순위 요약 (선택 세대 금액 기준) =====
 st.subheader("공동순위 요약 (선택 세대 금액 기준)")
 if sel_rank is None or pd.isna(sel_key):
     st.info("선택 세대의 환산감정가가 유효하지 않아 공동순위를 계산할 수 없습니다.")
@@ -474,7 +490,10 @@ if not bad_rows.empty:
     st.warning(f"환산감정가 비정상 값 {len(bad_rows)}건 발견 — 유효 세대수에서 제외됩니다.")
     with st.expander("비정상 환산감정가 행 보기 / 다운로드", expanded=False):
         cols_exist = [c for c in ["구역","동","호","공시가(억)","감정가(억)"] if c in bad_rows.columns]
-        bad_show = bad_rows[["구역","동","호"] + cols_exist].copy().drop_duplicates()
+        if "평형" in bad_rows.columns:
+            cols_exist = ["평형"] + cols_exist
+        show_cols_bad = ["구역","동","호"] + cols_exist
+        bad_show = bad_rows[show_cols_bad].copy().drop_duplicates()
         st.dataframe(bad_show.reset_index(drop=True), use_container_width=True)
         bad_csv = bad_show.to_csv(index=False).encode("utf-8-sig")
         st.download_button("비정상 환산감정가 목록 CSV 다운로드", bad_csv,
@@ -493,6 +512,7 @@ else:
     pool["감정가_클린"] = pool["감정가_클린"].astype(float)
     pool["층"] = pool["호"].apply(extract_floor)
 
+    # 선택 세대 자체 제외
     pool = pool[~(
         (pool["구역"] == st.session_state["zone"]) &
         (pool["동"] == st.session_state["dong"]) &
@@ -513,16 +533,33 @@ else:
         s = str(d);  return s if "동" in s else f"{s}동"
 
     rows = []
-    for (zone_name, dong_name), g in cand.dropna(subset=["층"]).groupby(["구역","동"]):
-        floors = sorted(set(int(x) for x in g["층"].dropna()))
-        if not floors: continue
+
+    # ✅ 평형이 있으면 ['구역','동','평형'] 기준으로 그룹핑 → 동 (평형) 형식으로 표기
+    group_cols = ["구역", "동"] + (["평형"] if "평형" in cand.columns else [])
+
+    for keys, g in cand.dropna(subset=["층"]).groupby(group_cols):
+        if len(group_cols) == 3:
+            zone_name, dong_name, pyeong_val = keys
+        else:
+            zone_name, dong_name = keys
+            pyeong_val = None
+
+        floors = sorted(set(int(x) for x in g["층"].dropna().tolist()))
+        if not floors:
+            continue
         ranges = contiguous_ranges(floors)
         ranges_str = ", ".join(format_range(s, e) for s, e in ranges)
+
         best_diff = float(g["유사도"].min())
         median_price = float(g["감정가_클린"].median())
+
+        dong_disp = _dong_label(dong_name)
+        if pyeong_val not in [None, "", np.nan]:
+            dong_disp = f"{dong_disp} ({_fmt_pyeong(pyeong_val)})"
+
         rows.append({
             "구역": zone_name,
-            "동": _dong_label(dong_name),
+            "동": dong_disp,
             "층 범위": ranges_str,
             "해당 세대수": int(len(g)),
             "최소차(억)": round(best_diff, 2),
@@ -549,6 +586,5 @@ else:
 
 # ===== 조회/확인 버튼 (선택 기록 보강) =====
 if st.button("확인", type="primary"):
-    # 버튼을 눌러도 반드시 선택 로그가 남도록 보강
     log_selection_if_ready()
     st.success("선택이 기록되었습니다. (시트 반영까지 약간의 지연이 있을 수 있습니다)")
