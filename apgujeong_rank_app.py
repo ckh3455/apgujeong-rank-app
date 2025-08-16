@@ -415,7 +415,7 @@ if not bad_rows.empty:
 
 st.divider()
 
-# ====== ⑧ 압구정 내 유사금액 10 (구역·동(평형)별 연속 층 범위) - 최소차 제거 ======
+# ====== ⑧ 압구정 내 유사금액 10 (구역·동(평형)별 연속 층 범위) - '층 범위' 좁힘 + '유사차수 환산가' 추가 ======
 st.subheader("압구정 내 금액이 유사한 차수 10 (구역·동(평형)별 연속 층 범위)")
 st.caption("※ 공시가격에 기반한 것으로 실제 시장 상황과 다를 수 있습니다.")
 
@@ -427,6 +427,7 @@ else:
     pool["감정가_클린"] = pool["감정가_클린"].astype(float)
     pool["층"] = pool["호"].apply(extract_floor)
 
+    # 선택 세대와 완전 동일한 항목은 제외
     pool = pool[~(
         (pool["구역"] == zone) &
         (pool["동"] == dong) &
@@ -434,6 +435,7 @@ else:
         (np.isclose(pool["감정가_클린"], sel_price, rtol=0, atol=1e-6))
     )].copy()
 
+    # 유사도 기준 후보군 정렬
     pool["유사도"] = (pool["감정가_클린"] - sel_price).abs()
     cand = pool.sort_values(["유사도", "감정가_클린"], ascending=[True, False]).head(1000).copy()
 
@@ -455,6 +457,7 @@ else:
             s += f" ({ip}평)"
         return s
 
+    # 평형이 있으면 (구역, 동, 평형) 기준 그룹핑, 없으면 (구역, 동)
     if "평형" in cand.columns and cand["평형"].notna().any():
         gb_keys = ["구역", "동", "평형"]
     else:
@@ -473,11 +476,15 @@ else:
         ranges = contiguous_ranges(floors)
         ranges_str = ", ".join(format_range(s, e) for s, e in ranges)
 
+        # ✅ 유사차수 대표 환산가(그룹 중앙값)
+        median_price = float(g["감정가_클린"].median())
+
         rows.append({
             "구역": zone_name,
             "동(평형)": _dong_label(dong_name, pyeong),
             "층 범위": ranges_str,
             "세대수": int(len(g)),
+            "유사차수 환산가(억)": round(median_price, 2),  # 표시용 2자리
             "_z": _zone_num(zone_name),
             "_d": _dong_num(dong_name)
         })
@@ -485,16 +492,37 @@ else:
     if not rows:
         st.info("유사 금액 결과가 없습니다.")
     else:
-        out = pd.DataFrame(rows).sort_values(["_z","_d","세대수"], ascending=[True, True, False]).head(10)
-        out = out.drop(columns=["_z","_d"])
+        out = (
+            pd.DataFrame(rows)
+            .sort_values(["_z","_d","세대수"], ascending=[True, True, False])
+            .head(10)
+            .drop(columns=["_z","_d"])
+        )
+
+        # 🔧 '층 범위' 칸을 더 좁게 보이도록 CSS + column_config
+        st.markdown("""
+        <style>
+        #sim-table thead tr th:nth-child(3),
+        #sim-table tbody tr td:nth-child(3){
+            width: 120px !important; min-width: 90px !important; max-width: 150px !important;
+            white-space: normal !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
         col_conf_sim = {
             "구역": st.column_config.TextColumn("구역", width="small"),
             "동(평형)": st.column_config.TextColumn("동(평형)", width="small"),
-            "층 범위": st.column_config.TextColumn("층 범위", width="medium"),
-            "세대수": st.column_config.NumberColumn("세대수", width="small")
+            "층 범위": st.column_config.TextColumn("층 범위", width="small"),     # ✅ 더 좁게
+            "세대수": st.column_config.NumberColumn("세대수", width="small"),
+            "유사차수 환산가(억)": st.column_config.NumberColumn("유사차수 환산가(억)", format="%.2f", width="small"),
         }
-        st.dataframe(out, use_container_width=True, hide_index=True, column_config=col_conf_sim)
 
+        st.markdown('<div id="sim-table">', unsafe_allow_html=True)
+        st.dataframe(out, use_container_width=True, hide_index=True, column_config=col_conf_sim)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # CSV 다운로드
         csv_sim = out.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
             "유사금액 범위 TOP10 CSV 다운로드",
@@ -502,3 +530,4 @@ else:
             file_name=f"압구정_유사금액_범위_TOP10_{zone}_{dong}_{ho}.csv",
             mime="text/csv"
         )
+
