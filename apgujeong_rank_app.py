@@ -546,12 +546,14 @@ if not bad_rows.empty:
 # ===== 로그(확인 버튼 눌렀을 때만) =====
 if go:
     device = detect_device_from_toggle()
-    now = datetime.now()
+    now = now_local()                      # ← 로컬(기본 KST)
     date_str = now.strftime("%Y-%m-%d")
     time_str = now.strftime("%H:%M")
+
 
     ok, msg = append_usage_row(date_str, time_str, device, str(zone), str(dong), str(ho))
     if ok:
         st.success("조회/기록되었습니다.")
     else:
         st.warning(f"로그 기록 생략: {msg}")
+
