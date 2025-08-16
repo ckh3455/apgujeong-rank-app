@@ -77,7 +77,7 @@ PROMO_TEXT_HTML = """
 
 # ===================== 유틸/도우미 =====================
 def add_cache_bust(url: str) -> str:
-    """Google Sheets export URL 캐시 우회용으로 cb 파라미터를 추가."""
+    """Google Sheets export URL 캐시 우회용으로 cb 파라미터 추가."""
     if not isinstance(url, str):
         return url
     try:
@@ -108,13 +108,13 @@ def clean_price(series: pd.Series) -> pd.Series:
     if series is None:
         return pd.Series(dtype=float)
     s = series.astype(str)
-    s = (s.str.replace('\u00A0','', regex=False)  # NBSP
+    s = (s.str.replace('\u00A0','', regex=False)
            .str.replace(',', '', regex=False)
            .str.replace('`', '', regex=False)
            .str.replace("'", '', regex=False)
            .str.replace('억', '', regex=False)
            .str.strip())
-    s = s.str.replace(r'[^0-9.\-]', '', regex=True)  # 숫자/소수점/음수만
+    s = s.str.replace(r'[^0-9.\-]', '', regex=True)
     return pd.to_numeric(s, errors='coerce')
 
 def extract_floor(ho) -> float:
@@ -157,7 +157,7 @@ def _num_from_text(txt, default=10**9):
 # ===================== 데이터 로딩 =====================
 def load_data(source):
     """URL이면 read_excel/CSV, 로컬이면 read_excel → 표준화 후 환산감정가 생성(공시가÷CONVERSION, fallback: 감정가(억))."""
-    is_url = isinstance(source, str) and (source.startswith("http://") or source.startswith("https://"))
+    is_url = isinstance(source, str) and source.startswith(("http://","https://"))
     with st.spinner("데이터 불러오는 중…"):
         if is_url:
             src = add_cache_bust(source)
@@ -174,15 +174,14 @@ def load_data(source):
             df = pd.read_excel(p, sheet_name=0)
 
     # 열 이름 표준화
-    rename_map = {
+    df = df.rename(columns={
         "구역":"구역","동":"동","호":"호",
         "공시가(억)":"공시가(억)","감정가(억)":"감정가(억)",
         "평형":"평형"
-    }
-    df = df.rename(columns=rename_map)
+    })
 
     # 문자열 정리
-    for c in ["구역","동","호"]:
+    for c in ["구역","동","호","평형"]:
         if c in df.columns:
             df[c] = df[c].astype(str).str.strip()
 
@@ -228,13 +227,7 @@ def log_event(event_type, zone=None, dong=None, ho=None, ext=None):
         st.session_state["sid"] = sid
     try:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        row = [
-            now,                           # 시간
-            sid,                           # 세션ID
-            event_type,                    # 이벤트 종류
-            zone or "", dong or "", ho or "",
-            ext or ""                      # 기타/오류
-        ]
+        row = [now, sid, event_type, zone or "", dong or "", ho or "", ext or ""]
         ws.append_row(row, value_input_option="RAW")
         st.session_state["last_log_ok"] = True
     except Exception as e:
@@ -289,10 +282,9 @@ try:
         df = pd.read_excel(resolved_source, sheet_name=0)
         df = df.rename(columns={
             "구역":"구역","동":"동","호":"호",
-            "공시가(억)":"공시가(억)","감정가(억)":"감정가(억)",
-            "평형":"평형"
+            "공시가(억)":"공시가(억)","감정가(억)":"감정가(억)","평형":"평형"
         })
-        for c in ["구역","동","호"]:
+        for c in ["구역","동","호","평형"]:
             if c in df.columns:
                 df[c] = df[c].astype(str).str.strip()
         public = pd.to_numeric(df.get("공시가(억)"), errors="coerce")
@@ -368,13 +360,19 @@ work["공동세대수"] = work.groupby("가격키")["가격키"].transform("size
 # 높은 금액 우선 정렬(+동/호 보조)
 work = work.sort_values(["가격키", "동", "호"], ascending=[False, True, True]).reset_index(drop=True)
 
-# 선택 세대 순위/공동
+# 선택 세대 정보
 sel_row = work[(work["동"] == dong) & (work["호"] == ho)]
-sel_price = float(sel_row.iloc[0]["감정가_클린"]) if not sel_row.empty else np.nan
-sel_key = round(sel_price, ROUND_DECIMALS) if (pd.notna(sel_price) and ROUND_DECIMALS is not None) else sel_price
-sel_rank = int(sel_row.iloc[0]["순위"]) if not sel_row.empty else None
-sel_tied = int(sel_row.iloc[0]["공동세대수"]) if not sel_row.empty else 0
-sel_py = sel_row.iloc[0]["평형"] if "평형" in sel_row.columns and not sel_row.empty else np.nan
+sel_price  = float(sel_row.iloc[0]["감정가_클린"]) if not sel_row.empty else np.nan
+sel_key    = round(sel_price, ROUND_DECIMALS) if (pd.notna(sel_price) and ROUND_DECIMALS is not None) else sel_price
+sel_rank   = int(sel_row.iloc[0]["순위"]) if not sel_row.empty else None
+sel_tied   = int(sel_row.iloc[0]["공동세대수"]) if not sel_row.empty else 0
+sel_py     = sel_row.iloc[0]["평형"] if "평형" in sel_row.columns and not sel_row.empty else np.nan
+
+# ✅ 선택 세대 공시가(억) 추출
+sel_public = np.nan
+if not sel_df.empty and "공시가(억)" in sel_df.columns:
+    _tmp = clean_price(pd.Series([sel_df.iloc[0]["공시가(억)"]]))
+    sel_public = float(_tmp.iloc[0]) if pd.notna(_tmp.iloc[0]) else np.nan
 
 total_units_valid = int(len(work))
 
@@ -384,15 +382,17 @@ if mobile_simple:
     st.metric("구역 전체 세대수", f"{total_units_all:,} 세대")
     st.metric("유효 세대수(환산감정가 있음)", f"{total_units_valid:,} 세대")
     st.metric(f"선택 세대 {DISPLAY_PRICE_LABEL}", f"{sel_price:,.2f}" if pd.notna(sel_price) else "-")
+    st.metric("선택 세대 25년 공시가(억)", f"{sel_public:,.2f}" if pd.notna(sel_public) else "-")
     if pd.notna(sel_py):
         st.metric("선택 세대 평형", f"{sel_py}")
 else:
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("선택 구역", zone)
     m2.metric("구역 전체 세대수", f"{total_units_all:,} 세대")
     m3.metric("유효 세대수(환산감정가 있음)", f"{total_units_valid:,} 세대")
     m4.metric(f"선택 세대 {DISPLAY_PRICE_LABEL}", f"{sel_price:,.2f}" if pd.notna(sel_price) else "-")
-    m5.metric("선택 세대 평형", f"{sel_py}" if pd.notna(sel_py) else "-")
+    m5.metric("선택 세대 25년 공시가(억)", f"{sel_public:,.2f}" if pd.notna(sel_public) else "-")
+    m6.metric("선택 세대 평형", f"{sel_py}" if pd.notna(sel_py) else "-")
 
 if pd.isna(sel_price):
     st.info("선택 세대의 환산감정가가 비어 있거나 숫자 형식이 아닙니다. 순위 계산에서 제외됩니다.")
@@ -406,13 +406,16 @@ st.caption(DISPLAY_PRICE_NOTE)
 st.divider()
 
 # ===== 선택 세대 상세 =====
-basic_cols = ["동", "호", "평형", "감정가_클린", "순위", "공동세대수"]
+basic_cols = ["동", "호", "평형", "공시가(억)", "감정가_클린", "순위", "공동세대수"]  # 공시가 포함
 full_cols  = ["구역", "동", "호", "평형", "공시가(억)", "감정가(억)", "감정가_클린", "순위", "공동세대수"]
 show_cols  = basic_cols if mobile_simple else full_cols
 
 st.subheader("선택 세대 상세")
 if not sel_row.empty:
-    sel_view = sel_row[show_cols].rename(columns={"감정가_클린": DISPLAY_PRICE_LABEL})
+    sel_view = sel_row[show_cols].rename(columns={
+        "감정가_클린": DISPLAY_PRICE_LABEL,
+        "공시가(억)": "25년 공시가(억)"  # 보기 라벨
+    })
     st.dataframe(sel_view.reset_index(drop=True), use_container_width=True, height=200 if mobile_simple else None)
 else:
     st.info("선택 세대는 유효 순위 계산 집합에 없습니다.")
@@ -503,9 +506,10 @@ else:
         best_diff = float(g["유사도"].min())
         median_price = float(g["감정가_클린"].median())
 
+        dong_disp = f"{dong_name}동" if "동" not in str(dong_name) else str(dong_name)
         rows.append({
             "구역": zone_name,
-            "동(평형)": f"{dong_name}동 ({py})" if "동" not in str(dong_name) else f"{dong_name} ({py})",
+            "동(평형)": f"{dong_disp} ({py})" if str(py).strip() not in ["", "nan", "None"] else dong_disp,
             "층 범위": ranges_str,
             "해당 세대수": int(len(g)),
             "최소차(억)": round(best_diff, 2),
