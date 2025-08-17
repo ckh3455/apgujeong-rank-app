@@ -4,37 +4,21 @@
 import re
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import numpy as np
 import pandas as pd
 import streamlit as st
-from datetime import datetime, timezone, timedelta
+
+# zoneinfo (Py3.9+)
 try:
-    from zoneinfo import ZoneInfo  # Python 3.9+
+    from zoneinfo import ZoneInfo
 except Exception:
     ZoneInfo = None
 
-def now_kst() -> datetime:
-    """
-    한국 표준시(Asia/Seoul) 현재 시간 반환.
-    zoneinfo가 없거나 실패하면 +09:00 고정 오프셋으로 대체.
-    """
-    try:
-        if ZoneInfo:
-            # 가장 정확한 방법: UTC→Asia/Seoul
-            return datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
-    except Exception:
-        pass
-    # fallback: UTC + 9시간
-    return datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(
-        timezone(timedelta(hours=9))
-    )
-
-
 # ===== 페이지 설정 =====
 st.set_page_config(
-    page_title="압구정 구역별 감정가 순위",
+    page_title="압구정 예비권리가액 알고사기",
     page_icon="🏢",
     layout="wide",
 )
@@ -52,7 +36,7 @@ APP_DESCRIPTION = (
 PROMO_TEXT_HTML = """
 <div class="promo-box">
   <div class="promo-title">📞 <b>압구정 원 부동산</b></div>
-  <div class="promo-line">압구정 재건축 전문 컨설팅 · <b>순위를 알고 사야하는 압구정</b></div>
+  <div class="promo-line">압구정 재건축 전문 컨설팅 · <b>권리리순위를 알고 사야하는 압구정</b></div>
   <div class="promo-line"><b>문의</b></div>
   <div class="promo-line">02-540-3334 / 최이사 Mobile 010-3065-1780</div>
   <div class="promo-small">압구정 미래가치 예측.</div>
@@ -96,10 +80,27 @@ thead tr th div[role="button"] p {
 table td, table th {
   word-break: keep-all;
 }
+
+/* 💡 모바일에서 프로모 카드가 안 보이는 경우를 대비해 강제 표시 */
+@media (max-width: 640px){
+  .promo-box { display:block !important; visibility:visible !important; opacity:1 !important; }
+}
 </style>
 """,
     unsafe_allow_html=True,
 )
+
+# ===== KST 시간 헬퍼 =====
+def now_kst() -> datetime:
+    """한국 표준시(Asia/Seoul) 현재 시간. zoneinfo 실패시 +09:00 고정 오프셋으로 대체."""
+    try:
+        if ZoneInfo:
+            return datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
+    except Exception:
+        pass
+    return datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(
+        timezone(timedelta(hours=9))
+    )
 
 # ===== 작은 유틸 =====
 def normalize_gsheet_url(url: str) -> str:
@@ -116,7 +117,6 @@ def normalize_gsheet_url(url: str) -> str:
             return f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=xlsx&gid={gid}"
     return url
 
-
 def clean_price(series: pd.Series) -> pd.Series:
     """문자 섞인 가격 문자열 → 숫자(float)로 정리."""
     s = series.astype(str)
@@ -131,7 +131,6 @@ def clean_price(series: pd.Series) -> pd.Series:
     s = s.str.replace(r"[^0-9.\-]", "", regex=True)  # 숫자/소수점/음수만
     return pd.to_numeric(s, errors="coerce")
 
-
 def extract_floor(ho) -> float:
     """호수에서 숫자만 추출해 '층'으로 환산 (예: 702 → 7층, 1101 → 11층)"""
     s = str(ho)
@@ -144,7 +143,6 @@ def extract_floor(ho) -> float:
         return float(int(digits[0]))
     else:
         return float(int(digits))
-
 
 def contiguous_ranges(sorted_ints):
     """정수 리스트(오름차순) → 연속 구간 [(s,e), ...]"""
@@ -163,15 +161,17 @@ def contiguous_ranges(sorted_ints):
         ranges.append((start, prev))
     return ranges
 
-
 def format_range(s, e):
     return f"{s}층" if s == e else f"{s}층에서 {e}층까지"
-
 
 def detect_device_from_toggle() -> str:
     """모바일 간단 보기 토글 기준으로 device 기록"""
     return "mobile" if st.session_state.get("mobile_simple", False) else "desktop"
 
+def show_promo():
+    """선택 세대 상세 표 바로 아래에 프로모 카드 출력 (모바일 강제표시 CSS 포함)"""
+    st.markdown(PROMO_TEXT_HTML, unsafe_allow_html=True)
+    st.write("")  # 겹침 방지용 여백
 
 # ===== 데이터 로딩 =====
 def load_data(source):
@@ -192,7 +192,6 @@ def load_data(source):
             df = pd.read_excel(p, sheet_name=0)
 
     # 열 이름 표준화(필수: 구역·동·호·공시가(억) / 선택: 감정가(억), 평형)
-    # 사용자가 실제 시트에서 쓰는 한글 열명을 그대로 맞춰줍니다.
     rename_map = {
         "구역": "구역",
         "동": "동",
@@ -225,10 +224,9 @@ def load_data(source):
 
     return df
 
-
 # ===== 구글시트 로깅 =====
 def append_usage_row(date_str, time_str, device, zone, dong, ho):
-    """구글 시트에 간소화된 사용 로그 기록"""
+    """구글 시트에 간소화된 사용 로그 기록 (sheet1 사용)"""
     if "gcp_service_account" not in st.secrets or not st.secrets.get("USAGE_SHEET_ID"):
         return False, "시크릿에 서비스 계정/시트 ID가 없습니다."
     try:
@@ -251,7 +249,6 @@ def append_usage_row(date_str, time_str, device, zone, dong, ho):
         return True, "ok"
     except Exception as e:
         return False, str(e)
-
 
 # ===== 상단 UI =====
 st.title("🏢 압구정 구역별 감정가 순위")
@@ -329,15 +326,14 @@ if sel_df.empty:
     st.warning("선택한 동/호 데이터가 없습니다.")
     st.stop()
 
-# ===== 확인(조회/기록) 버튼 =====
+# ===== 확인(조회/기록) 버튼 & 게이트 =====
 go = st.button("✅ 선택 세대 확인/기록")
 st.divider()
 
 # 🔒 버튼을 누르기 전엔 결과를 전혀 보여주지 않음
 if not go:
-    st.info("구역·동·호를 선택한 뒤 **[✅ 선택 세대 확인/기록]** 버튼을 눌러 결과를 확인하세요.")
+    st.info("구역·동·호를 선택한 뒤 **[✅ 선택 세대 확인/기록]** 버튼을 누르면 결과가 표시됩니다.")
     st.stop()
-
 
 # ===== 순위 계산(경쟁 순위) =====
 total_units_all = len(zone_df)
@@ -394,8 +390,6 @@ st.divider()
 
 # ===== 선택 세대 상세 =====
 st.subheader("선택 세대 상세")
-detail = work[(work["동"] == dong) & (work["호"] == ho)].copy()
-
 # '25년 공시가(억)' 값이 있으면 그걸, 없으면 '공시가(억)'를 표기용으로 사용
 if "25년 공시가(억)" in sel_df.columns:
     public_one = clean_price(sel_df["25년 공시가(억)"]).iloc[0]
@@ -430,7 +424,7 @@ st.dataframe(
 )
 
 # === 프로모 카드(모바일/PC 공통, 항상 표 아래) ===
-st.markdown(PROMO_TEXT_HTML, unsafe_allow_html=True)
+show_promo()
 st.divider()
 
 # ===== 공동순위 요약 (선택 세대 금액 기준 · 동·평형별 연속 층 범위) =====
@@ -467,6 +461,7 @@ else:
         return int(m.group()) if m else 10 ** 9
 
     rows = sorted(rows, key=lambda r: _dong_num(r["동(평형)"]))
+
     if rows:
         out = pd.DataFrame(rows)
         st.dataframe(out, use_container_width=True, hide_index=True)
@@ -574,16 +569,13 @@ if not bad_rows.empty:
 # ===== 로그(확인 버튼 눌렀을 때만) =====
 if go:
     device = detect_device_from_toggle()
-
     # ✅ 한국 시간으로 기록
     now = now_kst()
-    date_str = now.strftime("%Y-%m-%d")  # YYYY-MM-DD
-    time_str = now.strftime("%H:%M")     # HH:MM (24h)
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H:%M")
 
     ok, msg = append_usage_row(date_str, time_str, device, str(zone), str(dong), str(ho))
     if ok:
         st.success("조회/기록되었습니다.")
     else:
         st.warning(f"로그 기록 생략: {msg}")
-
-
