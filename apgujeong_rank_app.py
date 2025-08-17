@@ -64,24 +64,32 @@ st.markdown(
   label, .stSelectbox label { font-size: 0.95rem !important; }
 }
 
-/* 프로모 박스 */
-.promo-box { padding: 12px 14px; border-radius: 12px; background: #fafafa;
-  border: 1px solid #eee; margin: 10px 0 0 0; }
+/* 프로모 박스 (다크테마에서도 글자 보이도록 컬러 강제) */
+.promo-box {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fafafa;                 /* 밝은 배경 */
+  border: 1px solid #eee;
+  margin: 10px 0 0 0;
+  color: #111 !important;              /* <-- 글자색 강제 */
+  -webkit-text-fill-color: #111 !important;  /* iOS 대비 */
+}
+.promo-box * {
+  color: #111 !important;              /* 내부 텍스트 전부 강제 */
+  -webkit-text-fill-color: #111 !important;
+}
+
 .promo-title { font-size: 1.15rem; font-weight: 800; margin-bottom: 4px; }
 .promo-line  { font-size: 1.02rem; font-weight: 600; line-height: 1.5; }
 .promo-small { font-size: 1.0rem;  font-weight: 700; font-style: italic; margin-top: 6px; }
 
 /* 표 헤더 글자 길면 줄바꿈 */
-thead tr th div[role="button"] p {
-  white-space: normal !important;
-}
+thead tr th div[role="button"] p { white-space: normal !important; }
 
 /* '선택 세대 상세' 표 헤더 폰트/셀 폭 보정 */
-table td, table th {
-  word-break: keep-all;
-}
+table td, table th { word-break: keep-all; }
 
-/* 💡 모바일에서 프로모 카드가 안 보이는 경우를 대비해 강제 표시 */
+/* 모바일에서 프로모 카드가 안 보이는 경우 강제 표시 */
 @media (max-width: 640px){
   .promo-box { display:block !important; visibility:visible !important; opacity:1 !important; }
 }
@@ -89,6 +97,7 @@ table td, table th {
 """,
     unsafe_allow_html=True,
 )
+
 
 # ===== KST 시간 헬퍼 =====
 def now_kst() -> datetime:
@@ -579,3 +588,4 @@ if go:
         st.success("조회/기록되었습니다.")
     else:
         st.warning(f"로그 기록 생략: {msg}")
+
