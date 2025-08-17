@@ -9,6 +9,28 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import streamlit as st
+from datetime import datetime, timezone, timedelta
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except Exception:
+    ZoneInfo = None
+
+def now_kst() -> datetime:
+    """
+    한국 표준시(Asia/Seoul) 현재 시간 반환.
+    zoneinfo가 없거나 실패하면 +09:00 고정 오프셋으로 대체.
+    """
+    try:
+        if ZoneInfo:
+            # 가장 정확한 방법: UTC→Asia/Seoul
+            return datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
+    except Exception:
+        pass
+    # fallback: UTC + 9시간
+    return datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(
+        timezone(timedelta(hours=9))
+    )
+
 
 # ===== 페이지 설정 =====
 st.set_page_config(
@@ -311,6 +333,12 @@ if sel_df.empty:
 go = st.button("✅ 선택 세대 확인/기록")
 st.divider()
 
+# 🔒 버튼을 누르기 전엔 결과를 전혀 보여주지 않음
+if not go:
+    st.info("구역·동·호를 선택한 뒤 **[✅ 선택 세대 확인/기록]** 버튼을 눌러 결과를 확인하세요.")
+    st.stop()
+
+
 # ===== 순위 계산(경쟁 순위) =====
 total_units_all = len(zone_df)
 
@@ -546,12 +574,16 @@ if not bad_rows.empty:
 # ===== 로그(확인 버튼 눌렀을 때만) =====
 if go:
     device = detect_device_from_toggle()
-    now = datetime.now()
-    date_str = now.strftime("%Y-%m-%d")
-    time_str = now.strftime("%H:%M")
+
+    # ✅ 한국 시간으로 기록
+    now = now_kst()
+    date_str = now.strftime("%Y-%m-%d")  # YYYY-MM-DD
+    time_str = now.strftime("%H:%M")     # HH:MM (24h)
 
     ok, msg = append_usage_row(date_str, time_str, device, str(zone), str(dong), str(ho))
     if ok:
         st.success("조회/기록되었습니다.")
     else:
         st.warning(f"로그 기록 생략: {msg}")
+
+
