@@ -36,7 +36,7 @@ APP_DESCRIPTION = (
 PROMO_TEXT_HTML = """
 <div class="promo-box">
   <div class="promo-title">📞 <b>압구정 원 부동산</b></div>
-  <div class="promo-line">압구정 재건축 전문 컨설팅 · <b>권리리순위를 알고 사야하는 압구정</b></div>
+  <div class="promo-line">압구정 재건축 전문 컨설팅 · <b>권리순위를 알고 사야하는 압구정</b></div>
   <div class="promo-line"><b>문의</b></div>
   <div class="promo-line">02-540-3334 / 최이사 Mobile 010-3065-1780</div>
   <div class="promo-small">압구정 미래가치 예측.</div>
@@ -588,4 +588,5 @@ if go:
         st.success("조회/기록되었습니다.")
     else:
         st.warning(f"로그 기록 생략: {msg}")
+
 
