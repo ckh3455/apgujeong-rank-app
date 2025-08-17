@@ -1,6 +1,6 @@
 # apgujeong_rank_app.py
 # 실행: streamlit run apgujeong_rank_app.py
-
+import streamlit as st
 import re
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 
 import numpy as np
 import pandas as pd
-import streamlit as st
+
 
 # zoneinfo (Py3.9+)
 try:
@@ -588,5 +588,6 @@ if go:
         st.success("조회/기록되었습니다.")
     else:
         st.warning(f"로그 기록 생략: {msg}")
+
 
 
