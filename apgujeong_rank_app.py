@@ -260,7 +260,7 @@ def append_usage_row(date_str, time_str, device, zone, dong, ho):
         return False, str(e)
 
 # ===== 상단 UI =====
-st.title("🏢 압구정 구역별 감정가 순위")
+st.title("🏢 압구정 예비권리가액 알고사기")
 st.info(APP_DESCRIPTION)
 
 top_left, top_right = st.columns([2, 1])
@@ -588,6 +588,7 @@ if go:
         st.success("조회/기록되었습니다.")
     else:
         st.warning(f"로그 기록 생략: {msg}")
+
 
 
 
